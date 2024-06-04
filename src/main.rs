@@ -146,7 +146,7 @@ fn block_websites(time_to_sleep: u64, task: &String, user_input_time: &String) -
     let mut hosts_content: String =
         fs::read_to_string(hosts_path).expect("Error while reading host file content");
     let websites_list_content: String =
-        fs::read_to_string(websites_file_path).expect("Error while reading website contetn");
+        fs::read_to_string(websites_file_path).expect("Error while reading website content");
 
     // dbg!(&backup_path);
     let mut backup_file = OpenOptions::new()

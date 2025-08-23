@@ -180,11 +180,11 @@ fn block_websites(time_to_sleep: u64, task: &String, user_input_time: &String) -
         .open(hosts_path)?;
     file.write_all(hosts_content.as_bytes())?;
 
-    let formated_message = format!(
+    let formatted_message = format!(
         "Blocked websites for {} for task: {}",
         user_input_time, task
     );
-    let mut sp = Spinner::new(Spinners::Dots9, formated_message.into());
+    let mut sp = Spinner::new(Spinners::Dots9, formatted_message.into());
     enable_raw_mode()?;
 
     let timer_duration = Duration::from_millis(time_to_sleep);

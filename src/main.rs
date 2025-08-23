@@ -19,6 +19,8 @@ use toml::Value;
 
 use std::io::Write;
 
+pub mod os_backend;
+
 // Top level struct to hold the TOML data.
 #[derive(Serialize)]
 struct Config {
@@ -61,22 +63,6 @@ struct Setup {
 //     return std::path::Path::new(path).is_file();
 // }
 
-const LINUX_HOSTS_PATH: &str = "/etc/hosts";
-const MACOS_HOSTS_PATH: &str = "/etc/hosts";
-const WINDOWS_HOSTS_PATH: &str = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-
-#[inline]
-const fn get_hosts_path() -> &'static str {
-    if cfg!(target_os = "linux") {
-        LINUX_HOSTS_PATH
-    } else if cfg!(target_os = "windows") {
-        WINDOWS_HOSTS_PATH
-    } else if cfg!(target_os = "macos") {
-        MACOS_HOSTS_PATH
-    } else {
-        panic!("Unsupported operating system");
-    }
-}
 
 // https://github.com/crossterm-rs/crossterm/blob/0.19/examples/event-poll-read.rs#L26
 fn print_events_with_timer(timer_duration: Duration) -> Result<()> {
@@ -105,7 +91,7 @@ fn print_events_with_timer(timer_duration: Duration) -> Result<()> {
     Ok(())
 }
 fn block_websites(time_to_sleep: u64, task: &String, user_input_time: &String) -> io::Result<()> {
-    let hosts_path: &str = get_hosts_path();
+    let hosts_path: &str = os_backend::get_hosts_path();
     let mut backup_path: PathBuf = PathBuf::new();
     let mut toml_config_path: PathBuf = PathBuf::new();
 
@@ -262,7 +248,7 @@ fn main() {
             }
         }
         Some(Commands::Reset) => {
-            let hosts_path: &str = get_hosts_path();
+            let hosts_path: &str = os_backend::get_hosts_path();
             let mut backup_path: PathBuf = PathBuf::new();
 
             if let Some(proj_dirs) = ProjectDirs::from("com", "chetanxpro", "focusguard") {

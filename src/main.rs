@@ -19,7 +19,7 @@ use toml::Value;
 
 use std::io::Write;
 
-pub mod os_backend;
+use focus::os_backend;
 
 // Top level struct to hold the TOML data.
 #[derive(Serialize)]

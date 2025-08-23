@@ -1,13 +1,8 @@
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf,
-};
+use clap::{Parser, Subcommand};
 
-use clap::{Args, Parser, Subcommand};
-use directories::ProjectDirs;
-
-use crate::{blocking::manage_websites, config::block, os_backend};
+use super::commands;
+use super::commands::setup::Setup;
+use super::set_block_for_time_and_task::set_block_for_time_and_task;
 
 #[derive(Parser)]
 #[command(author, version)]
@@ -37,97 +32,12 @@ pub enum Commands {
     Reset,
 }
 
-#[derive(Args)]
-pub struct Setup {
-    /// task name
-    #[arg(long = "list")]
-    pub list: String,
-}
-
 pub fn run_cli() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::Setup(setup)) => {
-            // println!("List path: {}", setup.list);
-            if let Some(proj_dirs) = ProjectDirs::from("com", "chetanxpro", "focusguard") {
-                let config_dir = proj_dirs.config_dir();
-
-                if !config_dir.exists() {
-                    fs::create_dir_all(config_dir).expect("Error while creating config directory");
-
-                    fs::File::create(config_dir.join("hosts_backup"))
-                        .expect("Error while creating hosts backup file");
-                }
-
-                let config = block::Config {
-                    website_list_path: setup.list.clone(),
-                };
-
-                let toml = toml::to_string(&config).unwrap();
-
-                fs::File::create(config_dir.join("config.toml")).unwrap();
-
-                let mut config_file = OpenOptions::new()
-                    .write(true)
-                    .truncate(true)
-                    .open(config_dir.join("config.toml"))
-                    .unwrap();
-
-                config_file.write_all(toml.as_bytes()).unwrap();
-
-                println!("Website file path saved in config ✅")
-            }
-        }
-        Some(Commands::Reset) => {
-            let hosts_path: &str = os_backend::get_hosts_path();
-            let mut backup_path: PathBuf = PathBuf::new();
-
-            if let Some(proj_dirs) = ProjectDirs::from("com", "chetanxpro", "focusguard") {
-                let config_dir = proj_dirs.config_dir();
-
-                backup_path = config_dir.join("hosts_backup");
-            }
-
-            let backup_file_content: String =
-                fs::read_to_string(backup_path).expect("Error while reading backup file");
-
-            let mut host_file = OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(hosts_path)
-                .unwrap();
-
-            host_file.write_all(backup_file_content.as_bytes()).unwrap();
-
-            println!("Hosts file reset ✅")
-        }
-        None => {
-            if let (Some(time), Some(task)) = (cli.time, cli.task) {
-                // println!("lol")
-                // println!("Time: {:#?} , Task: {}", time, task);
-
-                let mut time_in_milliseconds: u64;
-                // let time: String = cli.time;
-                // let task: String = args.task;
-
-                if time.contains("m") {
-                    time_in_milliseconds = time.replace("m", "").parse().unwrap();
-                    time_in_milliseconds = time_in_milliseconds * 60 * 1000
-                } else if time.contains("s") {
-                    time_in_milliseconds = time.replace("s", "").parse().unwrap();
-                    time_in_milliseconds = time_in_milliseconds * 1000
-                } else if time.contains("h") {
-                    time_in_milliseconds = time.replace("h", "").parse().unwrap();
-                    time_in_milliseconds = time_in_milliseconds * 60 * 60 * 1000
-                } else {
-                    time_in_milliseconds = 0
-                }
-
-                manage_websites::block_websites(time_in_milliseconds, &task, &time).expect("Error")
-            } else {
-                println!("No command provided");
-            }
-        }
+        Some(Commands::Setup(setup_list)) => commands::setup::cmd_setup(setup_list),
+        Some(Commands::Reset) => commands::reset::cmd_reset(),
+        None => set_block_for_time_and_task(cli),
     }
 }

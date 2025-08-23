@@ -1,7 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use directories::ProjectDirs;
 
-use serde::Serialize;
 use std::path::PathBuf;
 
 use std::fs::{self, OpenOptions};
@@ -9,13 +8,8 @@ use toml;
 
 use std::io::Write;
 
-use focus::{blocking::manage_websites, os_backend};
+use focus::{blocking::manage_websites, config::block, os_backend};
 
-// Top level struct to hold the TOML data.
-#[derive(Serialize)]
-struct Config {
-    website_list_path: String,
-}
 
 #[derive(Parser)]
 #[command(author, version)]
@@ -69,7 +63,7 @@ fn main() {
                         .expect("Error while creating hosts backup file");
                 }
 
-                let config = Config {
+                let config = block::Config {
                     website_list_path: setup.list.clone(),
                 };
 

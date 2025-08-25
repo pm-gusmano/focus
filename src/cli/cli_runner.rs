@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use super::commands;
-use super::commands::setup::Setup;
+use super::commands::setup::SetupConfigArgs;
 use super::set_block_for_time_and_task::set_block_for_time_and_task;
 
 #[derive(Parser)]
@@ -26,7 +26,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Setup focus
-    Setup(Setup),
+    Setup(SetupConfigArgs),
 
     /// Reset OS hosts file to original
     Reset,

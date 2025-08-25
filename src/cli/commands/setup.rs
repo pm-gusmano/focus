@@ -8,8 +8,8 @@ use serde::Serialize;
 use clap::Args;
 use directories::ProjectDirs;
 
-pub fn cmd_setup(setup: &Setup) {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "chetanxpro", "focusguard") {
+pub fn cmd_setup(setup: &SetupConfigArgs) {
+    if let Some(proj_dirs) = ProjectDirs::from("com", "user", "focus") {
         let config_dir = proj_dirs.config_dir();
 
         if !config_dir.exists() {
@@ -40,7 +40,7 @@ pub fn cmd_setup(setup: &Setup) {
 }
 
 #[derive(Args)]
-pub struct Setup {
+pub struct SetupConfigArgs {
     /// task name
     #[arg(long = "list")]
     pub list: String,

@@ -8,8 +8,8 @@ use serde::Serialize;
 use clap::Args;
 use directories::ProjectDirs;
 
-pub fn cmd_setup(setup: &SetupConfigArgs) {
-    if let Some(proj_dirs) = ProjectDirs::from("com", "user", "focus") {
+pub fn cmd_setup(setup_args: &SetupConfigArgs) {
+    if let Some(proj_dirs) = ProjectDirs::from("com", "chetanxpro", "focusguard") {
         let config_dir = proj_dirs.config_dir();
 
         if !config_dir.exists() {
@@ -20,7 +20,7 @@ pub fn cmd_setup(setup: &SetupConfigArgs) {
         }
 
         let block_config = BlockConfig {
-            website_list_path: setup.list.clone(),
+            website_list_path: setup_args.list.clone(),
         };
 
         let toml = toml::to_string(&block_config).unwrap();

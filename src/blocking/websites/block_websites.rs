@@ -16,7 +16,7 @@ use std::{
 
 use toml::Value;
 
-use crate::os_backend;
+use crate::{blocking::methods::duration, os_backend};
 
 // https://github.com/crossterm-rs/crossterm/blob/0.19/examples/event-poll-read.rs#L26
 pub fn print_events_with_timer(timer_duration: Duration) -> Result<()> {
@@ -45,10 +45,17 @@ pub fn print_events_with_timer(timer_duration: Duration) -> Result<()> {
     Ok(())
 }
 
-pub fn block_websites(
-    time_to_sleep: u64,
-    task: &String,
+// Make a struct in the blocking module that describes exactly what is to be
+// blocked (websites first, then apps later; how long, and a short-hand name
+// for that combination of what's to be blocked and for how long. The programs
+// that are blocked, the conditions for their blocking (at this point, just a
+// duration of time, but later more, like a schedule or location,) and the name
+// for that combination can be stored in a yaml or toml file in a few config
+// directories, and represented by a struct in Rust.
+
+pub fn block_websites_via_host_config_change(
     user_input_time: &String,
+    task: Option<&String>,
 ) -> io::Result<()> {
     let hosts_path = os_backend::get_hosts_path();
     let (backup_path, toml_config_path) = get_config_paths(hosts_path)?;
@@ -62,13 +69,13 @@ pub fn block_websites(
     let hosts_content = fs::read_to_string(hosts_path)?;
     let websites_list_content = fs::read_to_string(websites_file_path)?;
 
-    backup_hosts_file(&backup_path, &hosts_content)?;
+    make_backup_hosts_file(&backup_path, &hosts_content)?;
 
     let updated_hosts_content = update_hosts_content(&hosts_content, &websites_list_content);
 
     write_to_file(hosts_path, &updated_hosts_content)?;
 
-    show_blocking_spinner(time_to_sleep, task, user_input_time)?;
+    show_blocking_spinner(&user_input_time, task)?;
 
     restore_hosts_file(&backup_path, hosts_path)?;
 
@@ -113,7 +120,7 @@ fn get_config_paths(hosts_path: &str) -> io::Result<(PathBuf, PathBuf)> {
 }
 
 // Helper: Backup hosts file
-fn backup_hosts_file(backup_path: &PathBuf, hosts_content: &str) -> io::Result<()> {
+fn make_backup_hosts_file(backup_path: &PathBuf, hosts_content: &str) -> io::Result<()> {
     let mut backup_file = OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -147,23 +154,36 @@ fn write_to_file(path: &str, content: &str) -> io::Result<()> {
 
 // Helper: Spinner and timer
 fn show_blocking_spinner(
-    time_to_sleep: u64,
-    task: &String,
     user_input_time: &String,
+    task: Option<&String>,
 ) -> io::Result<()> {
-    let formatted_message = format!(
-        "Blocked websites for {} for task: {}",
-        user_input_time, task
-    );
-    let mut sp = Spinner::new(Spinners::Dots9, formatted_message.into());
-    enable_raw_mode()?;
-    let timer_duration = Duration::from_millis(time_to_sleep);
-    if let Err(e) = print_events_with_timer(timer_duration) {
-        println!("Error: {:?}\r", e);
+    // Make a message to inform the user what's being blocked.
+    let mut formatted_message = format!("Blocked websites for {}", user_input_time);
+    if let Some(t) = task {
+        let task_message = format!(" for task: {}", t);
+        formatted_message = format!("{}{}", formatted_message, task_message);
     }
-    disable_raw_mode()?;
+
+    // Display the message and spinner
+    println!("{}", formatted_message);
+    let mut sp = Spinner::new(Spinners::Dots9, formatted_message.clone().into());
+
+    let time_to_sleep_in_milliseconds = duration::parse_time_string(&user_input_time);
+    wait_with_user_input_and_timer(time_to_sleep_in_milliseconds)?;
     sp.stop();
     Ok(())
+}
+
+// Separate function for user input and timer logic
+fn wait_with_user_input_and_timer(time_to_sleep: u64) -> io::Result<()> {
+    enable_raw_mode()?;
+    let timer_duration = Duration::from_millis(time_to_sleep);
+    let result = print_events_with_timer(timer_duration);
+    disable_raw_mode()?;
+    if let Err(e) = &result {
+        println!("Error: {:?}\r", e);
+    }
+    result
 }
 
 // Helper: Restore hosts file from backup

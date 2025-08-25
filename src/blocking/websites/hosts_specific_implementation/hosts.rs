@@ -4,14 +4,6 @@ use std::{
     path::PathBuf,
 };
 
-use crate::blocking::config::config;
-
-/// Returns the path to the hosts backup file, ensuring the config directory exists.
-pub(in crate::blocking::websites) fn prepare_hosts_backups() -> io::Result<PathBuf> {
-    let config_dir = config::find_config_dir()?;
-    config::ensure_dir_exists(&config_dir)?;
-    Ok(config_dir.join("hosts_backup"))
-}
 
 // Helper: Update hosts file with blocked websites
 pub(in crate::blocking::websites) fn rewrite_hosts_contents_to_block_websites(

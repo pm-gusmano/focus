@@ -1,9 +1,12 @@
-use std::{fs, io};
+use std::{
+    fs,
+    io::{self, Write},
+};
 
 use crate::{blocking::methods::block_duration, os_backend};
 
 use super::hosts_specific_implementation::hosts::{
-    prepare_hosts_backups, restore_hosts_file, rewrite_hosts_contents_to_block_websites,
+    restore_hosts_file, rewrite_hosts_contents_to_block_websites,
 };
 use crate::blocking::{config::config, ui::spinners::show_interruptible_spinner_for_duration};
 
@@ -15,50 +18,81 @@ use crate::blocking::{config::config, ui::spinners::show_interruptible_spinner_f
 // for that combination can be stored in a yaml or toml file in a few config
 // directories, and represented by a struct in Rust.
 
-pub fn block_websites_via_hosts_config_change(
-    user_input_time: &String,
-    task: Option<&String>,
-) -> io::Result<()> {
-    // Get host path from os_backend
-    let hosts_path = os_backend::get_hosts_path();
 
-    // Using the config file from the `setup` CLI command, get the list of websites to block
-    let blocked_websites_list = get_blocked_website_list_from_toml_config()?;
-
-    // Prepare a backup of the hosts file and ensure they exist
-    let backup_path = prepare_hosts_backups()?;
-    fs::copy(&hosts_path, &backup_path)?;
-
-    let hosts_content = fs::read_to_string(&hosts_path)?;
-    let hosts_file_with_blocked_websites =
-        rewrite_hosts_contents_to_block_websites(&hosts_content, &blocked_websites_list);
-    println!("Content:\n {}", hosts_file_with_blocked_websites);
-
-    fs::write(&hosts_path, &hosts_file_with_blocked_websites)?;
-
-    // Setup, then display an interruptible timer
-    let formatted_message = generate_blocking_message(user_input_time, task);
-    let duration_to_wait = block_duration::parse_time_string(&user_input_time);
-    show_interruptible_spinner_for_duration(&duration_to_wait, &formatted_message)?;
-
-    // After the timer ends or is exited early, restore the hosts file
-    restore_hosts_file(&backup_path, &hosts_path)?;
-
-    // Inform the user
-    println!("\n  Unblocked websites ✅");
-    Ok(())
+pub trait Blockable {
+    fn block(&self) -> std::io::Result<()>;
+    fn unblock(&self) -> std::io::Result<()>;
 }
 
-fn get_blocked_website_list_from_toml_config() -> Result<String, io::Error> {
-    // Get the path to the config file
-    let toml_config_path = config::get_toml_config_path()?;
+struct Websites {
+    hosts_path: String,
+    backup_path: String,
+    pub blocked_websites_list: String,
+}
 
-    // Read the config file to generate the file path to the websites list
-    let blocked_websites_file_path = config::get_string_from_config(toml_config_path)?;
+impl Websites {
+    pub fn new() -> Self {
+        let hosts_path = os_backend::get_hosts_path().to_string();
+        let backup_path = Websites::backup_hosts(hosts_path.clone())
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let blocked_websites_list =
+            Websites::get_blocked_website_list_from_toml_config().unwrap_or_default();
 
-    // Get the list of blocked websites
-    let blocked_websites_list = fs::read_to_string(blocked_websites_file_path)?;
-    Ok(blocked_websites_list)
+        Websites {
+            hosts_path,
+            backup_path,
+            blocked_websites_list,
+        }
+    }
+
+    pub(super) fn backup_hosts(hosts_path: String) -> io::Result<std::path::PathBuf> {
+        let backup_path = config::find_config_dir()?.join("hosts_backup");
+        fs::create_dir_all(backup_path.parent().unwrap())?;
+        fs::copy(hosts_path, &backup_path)?;
+        Ok(backup_path)
+    }
+
+    fn get_blocked_website_list_from_toml_config() -> Result<String, io::Error> {
+        // Get the path to the config file
+        let toml_config_path = config::get_toml_config_path()?;
+
+        // Read the config file to generate the file path to the websites list
+        let blocked_websites_file_path = config::get_string_from_config(toml_config_path)?;
+
+        // Get the list of blocked websites
+        let blocked_websites_list = fs::read_to_string(blocked_websites_file_path)?;
+        Ok(blocked_websites_list)
+    }
+}
+
+impl Blockable for Websites {
+    fn block(&self) -> std::io::Result<()> {
+        let hosts_content = fs::read_to_string(&self.hosts_path)?;
+        let hosts_file_with_blocked_websites =
+            rewrite_hosts_contents_to_block_websites(&hosts_content, &self.blocked_websites_list);
+        println!("Content:\n {}", hosts_file_with_blocked_websites);
+        fs::write(&self.hosts_path, &hosts_file_with_blocked_websites)?;
+        Ok(())
+    }
+
+    fn unblock(&self) -> std::io::Result<()> {
+        let backup_file_content = fs::read_to_string(&self.backup_path)?;
+        let mut backup_file = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.hosts_path)?;
+        backup_file.write_all(backup_file_content.as_bytes())?;
+        Ok(())
+    }
+}
+
+fn show_blocking_spinner(user_input_time: &String, task: Option<&String>) -> io::Result<()> {
+    let formatted_message = generate_blocking_message(user_input_time, task);
+    let duration_to_wait = block_duration::parse_time_string(user_input_time);
+    show_interruptible_spinner_for_duration(&duration_to_wait, &formatted_message)?;
+    Ok(())
 }
 
 fn generate_blocking_message(user_input_time: &String, task: Option<&String>) -> String {

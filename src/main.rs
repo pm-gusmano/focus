@@ -1,6 +1,6 @@
-use focus::cli::cli_runner;
+use focus::cli::{cli_runner, cli_utils::ToExitCode};
 
-fn main() {
-    cli_runner::run_cli();
+fn main() -> std::process::ExitCode {
+    cli_runner::run_cli().to_exit_code()
 }
 

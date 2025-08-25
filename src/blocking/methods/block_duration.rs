@@ -18,9 +18,22 @@ pub fn parse_time_string(time: &String) -> Duration {
     Duration::from_millis(time_in_milliseconds)
 }
 
+// struct HourMinSec {
+//     hours: u64,
+//     minutes: u64,
+//     seconds: u64,
+// }
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // #[test]
+    // fn test_string_to_hour_min_sec_struct() {
+    //     let test_hour_min_sec_string = "1h30m45s".to_string();
+    //     let test_hour_min_sec_struct = test_hour_min_sec_string.to
+    // }
 
     #[test]
     fn test_parse_minutes() {

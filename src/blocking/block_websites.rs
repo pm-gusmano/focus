@@ -50,10 +50,34 @@ pub fn block_websites(
     task: &String,
     user_input_time: &String,
 ) -> io::Result<()> {
-    let hosts_path: &str = os_backend::get_hosts_path();
-    let mut backup_path: PathBuf = PathBuf::new();
-    let mut toml_config_path: PathBuf = PathBuf::new();
+    let hosts_path = os_backend::get_hosts_path();
+    let (backup_path, toml_config_path) = get_config_paths(hosts_path)?;
 
+    let websites_path_opt = get_websites_path(toml_config_path);
+    let websites_file_path = match &websites_path_opt {
+        Some(path) => path.as_str(),
+        None => "default",
+    };
+
+    let hosts_content = fs::read_to_string(hosts_path)?;
+    let websites_list_content = fs::read_to_string(websites_file_path)?;
+
+    backup_hosts_file(&backup_path, &hosts_content)?;
+
+    let updated_hosts_content = update_hosts_content(&hosts_content, &websites_list_content);
+
+    write_to_file(hosts_path, &updated_hosts_content)?;
+
+    show_blocking_spinner(time_to_sleep, task, user_input_time)?;
+
+    restore_hosts_file(&backup_path, hosts_path)?;
+
+    println!("\n  Unblocked websites ✅");
+    Ok(())
+}
+
+// Helper: Setup config paths
+fn get_config_paths(hosts_path: &str) -> io::Result<(PathBuf, PathBuf)> {
     if let Some(proj_dirs) = directories::ProjectDirs::from("com", "chetanxpro", "focusguard") {
         let config_dir = proj_dirs.config_dir();
 
@@ -65,8 +89,7 @@ pub fn block_websites(
         if !config_dir.exists() {
             fs::create_dir_all(config_dir).expect("Error while creating config directory");
 
-            backup_path = config_dir.join("hosts_backup");
-
+            let backup_path = config_dir.join("hosts_backup");
             fs::File::create(&backup_path).expect("Error while creating hosts backup file");
 
             let mut backup_host_file_for_emergency =
@@ -78,83 +101,79 @@ pub fn block_websites(
                 .expect("Error while writing to backup file");
         }
 
-        backup_path = config_dir.join("hosts_backup");
-        toml_config_path = config_dir.join("config.toml");
-
-        // dbg!(config_dir);
+        let backup_path = config_dir.join("hosts_backup");
+        let toml_config_path = config_dir.join("config.toml");
+        Ok((backup_path, toml_config_path))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "ProjectDirs not found",
+        ))
     }
+}
 
-    let website_file_option = get_websites_path(toml_config_path);
-
-    let websites_file_path = website_file_option.as_deref().unwrap_or("default");
-
-    let mut hosts_content: String =
-        fs::read_to_string(hosts_path).expect("Error while reading host file content");
-    let websites_list_content: String =
-        fs::read_to_string(websites_file_path).expect("Error while reading website content");
-
-    // dbg!(&backup_path);
+// Helper: Backup hosts file
+fn backup_hosts_file(backup_path: &PathBuf, hosts_content: &str) -> io::Result<()> {
     let mut backup_file = OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(&backup_path)
-        .expect("Not able to open backup file");
+        .open(backup_path)?;
+    backup_file.write_all(hosts_content.as_bytes())?;
+    Ok(())
+}
 
-    backup_file
-        .write_all(hosts_content.as_bytes())
-        .expect("Error while writing to backup file");
-
-    // website_list_path.clone();
-
-    let website_list: std::str::Split<'_, &str> = websites_list_content.split("\n");
-
-    hosts_content.push_str(&format!("\n# ========== Temp Hosts ========="));
+// Helper: Update hosts file with blocked websites
+fn update_hosts_content(hosts_content: &str, websites_list_content: &str) -> String {
+    let mut new_hosts_content = hosts_content.to_owned();
+    let website_list = websites_list_content.split('\n');
+    new_hosts_content.push_str("\n# ========== Temp Hosts =========");
     for website in website_list {
         println!("Website: {}", website);
-
         if !hosts_content.contains(website) {
-            hosts_content.push_str(&format!("\n127.0.0.1\t{}", website));
+            new_hosts_content.push_str(&format!("\n127.0.0.1\t{}", website));
         }
     }
-    hosts_content.push_str(&format!("\n# ========== Temp Hosts ========="));
-    println!("Content:\n {}", hosts_content);
+    new_hosts_content.push_str("\n# ========== Temp Hosts =========");
+    println!("Content:\n {}", new_hosts_content);
+    new_hosts_content
+}
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(hosts_path)?;
-    file.write_all(hosts_content.as_bytes())?;
+// Helper: Write to file
+fn write_to_file(path: &str, content: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+    file.write_all(content.as_bytes())?;
+    Ok(())
+}
 
+// Helper: Spinner and timer
+fn show_blocking_spinner(
+    time_to_sleep: u64,
+    task: &String,
+    user_input_time: &String,
+) -> io::Result<()> {
     let formatted_message = format!(
         "Blocked websites for {} for task: {}",
         user_input_time, task
     );
     let mut sp = Spinner::new(Spinners::Dots9, formatted_message.into());
     enable_raw_mode()?;
-
     let timer_duration = Duration::from_millis(time_to_sleep);
-
     if let Err(e) = print_events_with_timer(timer_duration) {
         println!("Error: {:?}\r", e);
     }
-
     disable_raw_mode()?;
     sp.stop();
+    Ok(())
+}
 
-    let backup_file_content: String =
-        fs::read_to_string(backup_path).expect("Error while reading backup file");
-
+// Helper: Restore hosts file from backup
+fn restore_hosts_file(backup_path: &PathBuf, hosts_path: &str) -> io::Result<()> {
+    let backup_file_content = fs::read_to_string(backup_path)?;
     let mut backup_file = OpenOptions::new()
         .write(true)
         .truncate(true)
-        .open(hosts_path)
-        .unwrap();
-
-    backup_file
-        .write_all(backup_file_content.as_bytes())
-        .unwrap();
-
-    println!("\n  Unblocked websites ✅");
+        .open(hosts_path)?;
+    backup_file.write_all(backup_file_content.as_bytes())?;
     Ok(())
 }
 

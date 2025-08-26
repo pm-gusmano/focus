@@ -2,7 +2,7 @@ pub mod os_backend;
 
 pub mod blocking {
     pub mod methods {
-        pub mod duration;
+        pub mod block_duration;
     }
     pub mod websites {
         pub mod block_websites;

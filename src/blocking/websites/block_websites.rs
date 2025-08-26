@@ -1,3 +1,5 @@
+// crossterm is only used to handle user input during the blocking timer.
+// => we can isolate it to a helper file later for simplicity.
 use crossterm::{
     event::{poll, read, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -9,41 +11,14 @@ use spinners::{Spinner, Spinners};
 
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Result, Write},
+    io::{self, Write},
     path::PathBuf,
     time::{self, Duration},
 };
 
 use toml::Value;
 
-use crate::{blocking::methods::duration, os_backend};
-
-// https://github.com/crossterm-rs/crossterm/blob/0.19/examples/event-poll-read.rs#L26
-pub fn print_events_with_timer(timer_duration: Duration) -> Result<()> {
-    let start_time = time::Instant::now();
-    println!("  ESC or 'e' to exit early");
-    loop {
-        // Wait up to 1s for another event
-        if poll(Duration::from_millis(1_000))? {
-            // It's guaranteed that read() won't block if `poll` returns `Ok(true)`
-            let event = read()?;
-
-            if event == Event::Key(KeyCode::Char('e').into()) {
-                break;
-            }
-            if event == Event::Key(KeyCode::Esc.into()) {
-                break;
-            }
-        } else {
-            if start_time.elapsed() >= timer_duration {
-                break;
-            } else {
-            }
-        }
-    }
-
-    Ok(())
-}
+use crate::{blocking::methods::block_duration, os_backend};
 
 // Make a struct in the blocking module that describes exactly what is to be
 // blocked (websites first, then apps later; how long, and a short-hand name
@@ -75,12 +50,25 @@ pub fn block_websites_via_host_config_change(
 
     write_to_file(hosts_path, &updated_hosts_content)?;
 
-    show_blocking_spinner(&user_input_time, task)?;
+    // Setup, then display the interruptible timer
+    let formatted_message = generate_blocking_message(user_input_time, task);
+    let duration_to_wait = block_duration::parse_time_string(&user_input_time);
+    show_interruptible_spinner_for_duration(&duration_to_wait, &formatted_message)?;
 
+    // After the timer ends or is exited early, restore the hosts file.
     restore_hosts_file(&backup_path, hosts_path)?;
 
     println!("\n  Unblocked websites ✅");
     Ok(())
+}
+
+fn generate_blocking_message(user_input_time: &String, task: Option<&String>) -> String {
+    // Make a message to inform the user what's being blocked.
+    let formatted_message = match task {
+        Some(t) => format!("Blocked websites for {} for task: {}", user_input_time, t),
+        None => format!("Blocked websites for {}", user_input_time),
+    };
+    formatted_message
 }
 
 // Helper: Setup config paths
@@ -153,37 +141,45 @@ fn write_to_file(path: &str, content: &str) -> io::Result<()> {
 }
 
 // Helper: Spinner and timer
-fn show_blocking_spinner(
-    user_input_time: &String,
-    task: Option<&String>,
-) -> io::Result<()> {
-    // Make a message to inform the user what's being blocked.
-    let mut formatted_message = format!("Blocked websites for {}", user_input_time);
-    if let Some(t) = task {
-        let task_message = format!(" for task: {}", t);
-        formatted_message = format!("{}{}", formatted_message, task_message);
-    }
-
-    // Display the message and spinner
-    println!("{}", formatted_message);
-    let mut sp = Spinner::new(Spinners::Dots9, formatted_message.clone().into());
-
-    let time_to_sleep_in_milliseconds = duration::parse_time_string(&user_input_time);
-    wait_with_user_input_and_timer(time_to_sleep_in_milliseconds)?;
+/// Shows a spinner with a message, and handles interruption directly.
+fn show_interruptible_spinner_for_duration(duration_to_wait: &Duration, message: &String) -> io::Result<()> {
+    let mut sp = Spinner::new(Spinners::Dots9, message.clone().into());
+    let outcome = wait_until_timer_or_interrupt(*duration_to_wait)?;
     sp.stop();
-    Ok(())
+
+    match outcome {
+        TimerOutcome::Completed => Ok(()),
+        TimerOutcome::ExitedEarly => {
+            println!("\n  Timer exited early by user.");
+            Ok(())
+        }
+    }
 }
 
-// Separate function for user input and timer logic
-fn wait_with_user_input_and_timer(time_to_sleep: u64) -> io::Result<()> {
+enum TimerOutcome {
+    Completed,
+    ExitedEarly,
+}
+
+fn wait_until_timer_or_interrupt(timer_duration: Duration) -> io::Result<TimerOutcome> {
+    let start_time = time::Instant::now();
+    println!("  Press ESC or 'e' to exit early!");
     enable_raw_mode()?;
-    let timer_duration = Duration::from_millis(time_to_sleep);
-    let result = print_events_with_timer(timer_duration);
-    disable_raw_mode()?;
-    if let Err(e) = &result {
-        println!("Error: {:?}\r", e);
+    while start_time.elapsed() < timer_duration {
+        if poll(Duration::from_millis(1_000))? {
+            let event = read()?;
+
+            // Check for 'e' or Esc key to exit early
+            if let Event::Key(key) = event {
+                if key.code == KeyCode::Char('e') || key.code == KeyCode::Esc {
+                    disable_raw_mode()?;
+                    return Ok(TimerOutcome::ExitedEarly);
+                }
+            }
+        }
     }
-    result
+    disable_raw_mode()?;
+    Ok(TimerOutcome::Completed)
 }
 
 // Helper: Restore hosts file from backup

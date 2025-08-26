@@ -1,16 +1,24 @@
+// crossterm is only used to handle user input during the blocking timer.
+// => we can isolate it to a helper file later for simplicity.
+use crossterm::{
+    event::{poll, read, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode},
+};
+
 use directories;
 
+use spinners::{Spinner, Spinners};
+
 use std::{
-    fs,
+    fs::{self, OpenOptions},
     io::{self, Write},
     path::PathBuf,
+    time::{self, Duration},
 };
 
 use toml::Value;
 
 use crate::{blocking::methods::block_duration, os_backend};
-
-use crate::blocking::ui::spinners::show_interruptible_spinner_for_duration;
 
 // Make a struct in the blocking module that describes exactly what is to be
 // blocked (websites first, then apps later; how long, and a short-hand name
@@ -20,50 +28,38 @@ use crate::blocking::ui::spinners::show_interruptible_spinner_for_duration;
 // for that combination can be stored in a yaml or toml file in a few config
 // directories, and represented by a struct in Rust.
 
-pub fn block_websites_via_hosts_config_change(
+pub fn block_websites_via_host_config_change(
     user_input_time: &String,
     task: Option<&String>,
 ) -> io::Result<()> {
-    // Get host path from os_backend
     let hosts_path = os_backend::get_hosts_path();
+    let (backup_path, toml_config_path) = get_config_paths(hosts_path)?;
 
-    // Using the config file from the `setup` CLI command, get the list of websites to block
-    let blocked_websites_list = get_blocked_website_list_from_toml_config()?;
+    let websites_path_opt = get_websites_path(toml_config_path);
+    let websites_file_path = match &websites_path_opt {
+        Some(path) => path.as_str(),
+        None => "default",
+    };
 
-    // Prepare a backup of the hosts file and ensure they exist
-    let backup_path = prepare_hosts_backups()?;
-    fs::copy(&hosts_path, &backup_path)?;
+    let hosts_content = fs::read_to_string(hosts_path)?;
+    let websites_list_content = fs::read_to_string(websites_file_path)?;
 
-    let hosts_content = fs::read_to_string(&hosts_path)?;
-    let hosts_file_with_blocked_websites =
-        rewrite_hosts_contents_to_block_websites(&hosts_content, &blocked_websites_list);
-    println!("Content:\n {}", hosts_file_with_blocked_websites);
+    make_backup_hosts_file(&backup_path, &hosts_content)?;
 
-    fs::write(&hosts_path, &hosts_file_with_blocked_websites)?;
+    let updated_hosts_content = update_hosts_content(&hosts_content, &websites_list_content);
 
-    // Setup, then display an interruptible timer
+    write_to_file(hosts_path, &updated_hosts_content)?;
+
+    // Setup, then display the interruptible timer
     let formatted_message = generate_blocking_message(user_input_time, task);
     let duration_to_wait = block_duration::parse_time_string(&user_input_time);
     show_interruptible_spinner_for_duration(&duration_to_wait, &formatted_message)?;
 
-    // After the timer ends or is exited early, restore the hosts file
-    restore_hosts_file(&backup_path, &hosts_path)?;
+    // After the timer ends or is exited early, restore the hosts file.
+    restore_hosts_file(&backup_path, hosts_path)?;
 
-    // Inform the user
     println!("\n  Unblocked websites ✅");
     Ok(())
-}
-
-fn get_blocked_website_list_from_toml_config() -> Result<String, io::Error> {
-    // Get the path to the config file
-    let toml_config_path = get_toml_config_path()?;
-
-    // Read the config file to generate the file path to the websites list
-    let blocked_websites_file_path = get_websites_file_path_from_config(toml_config_path)?;
-
-    // Get the list of blocked websites
-    let blocked_websites_list = fs::read_to_string(blocked_websites_file_path)?;
-    Ok(blocked_websites_list)
 }
 
 fn generate_blocking_message(user_input_time: &String, task: Option<&String>) -> String {
@@ -76,69 +72,120 @@ fn generate_blocking_message(user_input_time: &String, task: Option<&String>) ->
 }
 
 // Helper: Setup config paths
-/// Returns the paths for the hosts backup and config.toml file.
-/// Ensures the config directory and backup files exist, and instructs the user if setup is missing.
+fn get_config_paths(hosts_path: &str) -> io::Result<(PathBuf, PathBuf)> {
+    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "chetanxpro", "focusguard") {
+        let config_dir = proj_dirs.config_dir();
 
-// Helper: Find config directory
-fn find_config_dir() -> io::Result<PathBuf> {
-    let proj_dirs = directories::ProjectDirs::from("com", "chetanxpro", "focusguard")
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ProjectDirs not found"))?;
-    Ok(proj_dirs.config_dir().to_path_buf())
+        if !config_dir.join("config.toml").exists() {
+            println!("Please run `focus setup --list <exact path to website list>` to setup focus");
+            std::process::exit(1);
+        }
+
+        if !config_dir.exists() {
+            fs::create_dir_all(config_dir).expect("Error while creating config directory");
+
+            let backup_path = config_dir.join("hosts_backup");
+            fs::File::create(&backup_path).expect("Error while creating hosts backup file");
+
+            let mut backup_host_file_for_emergency =
+                fs::File::create(config_dir.join("hosts_backup_for_revert"))
+                    .expect("Error while creating hosts backup file");
+
+            backup_host_file_for_emergency
+                .write_all(fs::read_to_string(hosts_path).unwrap().as_bytes())
+                .expect("Error while writing to backup file");
+        }
+
+        let backup_path = config_dir.join("hosts_backup");
+        let toml_config_path = config_dir.join("config.toml");
+        Ok((backup_path, toml_config_path))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "ProjectDirs not found",
+        ))
+    }
 }
 
-// Helper: Ensure config.toml exists
-fn ensure_config_file_exists(config_dir: &PathBuf) -> io::Result<PathBuf> {
-    let toml_config_path = config_dir.join("config.toml");
-    if !toml_config_path.exists() {
-        println!("Please run `focus setup --list <exact path to website list>` to setup focus");
-        std::process::exit(1);
-    }
-    Ok(toml_config_path)
-}
-
-// Helper: Ensure config directory exists
-fn ensure_dir_exists(config_dir: &PathBuf) -> io::Result<()> {
-    if !config_dir.exists() {
-        fs::create_dir_all(config_dir).expect("Error while creating config directory");
-    }
+// Helper: Backup hosts file
+fn make_backup_hosts_file(backup_path: &PathBuf, hosts_content: &str) -> io::Result<()> {
+    let mut backup_file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(backup_path)?;
+    backup_file.write_all(hosts_content.as_bytes())?;
     Ok(())
 }
 
-/// Returns the path to the config.toml file, ensuring it exists and instructing the user if missing.
-fn get_toml_config_path() -> io::Result<PathBuf> {
-    let config_dir = find_config_dir()?;
-    ensure_dir_exists(&config_dir)?;
-    ensure_config_file_exists(&config_dir)
-}
-
-/// Returns the path to the hosts backup file, ensuring the config directory exists.
-fn prepare_hosts_backups() -> io::Result<PathBuf> {
-    let config_dir = find_config_dir()?;
-    ensure_dir_exists(&config_dir)?;
-    Ok(config_dir.join("hosts_backup"))
-}
-
 // Helper: Update hosts file with blocked websites
-fn rewrite_hosts_contents_to_block_websites(
-    hosts_content: &str,
-    websites_list_content: &str,
-) -> String {
-    let mut hosts_file_with_blocked_websites = hosts_content.to_owned();
-    hosts_file_with_blocked_websites.push_str("\n# ========== Temp Hosts =========");
-    for website in websites_list_content.lines() {
-        let website = website.trim();
-        if !website.is_empty() && !hosts_content.contains(website) {
-            hosts_file_with_blocked_websites.push_str(&format!("\n127.0.0.1\t{}", website));
+fn update_hosts_content(hosts_content: &str, websites_list_content: &str) -> String {
+    let mut new_hosts_content = hosts_content.to_owned();
+    let website_list = websites_list_content.split('\n');
+    new_hosts_content.push_str("\n# ========== Temp Hosts =========");
+    for website in website_list {
+        println!("Website: {}", website);
+        if !hosts_content.contains(website) {
+            new_hosts_content.push_str(&format!("\n127.0.0.1\t{}", website));
         }
     }
-    hosts_file_with_blocked_websites.push_str("\n# ========== Temp Hosts =========");
-    hosts_file_with_blocked_websites
+    new_hosts_content.push_str("\n# ========== Temp Hosts =========");
+    println!("Content:\n {}", new_hosts_content);
+    new_hosts_content
+}
+
+// Helper: Write to file
+fn write_to_file(path: &str, content: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+    file.write_all(content.as_bytes())?;
+    Ok(())
+}
+
+// Helper: Spinner and timer
+/// Shows a spinner with a message, and handles interruption directly.
+fn show_interruptible_spinner_for_duration(duration_to_wait: &Duration, message: &String) -> io::Result<()> {
+    let mut sp = Spinner::new(Spinners::Dots9, message.clone().into());
+    let outcome = wait_until_timer_or_interrupt(*duration_to_wait)?;
+    sp.stop();
+
+    match outcome {
+        TimerOutcome::Completed => Ok(()),
+        TimerOutcome::ExitedEarly => {
+            println!("\n  Timer exited early by user.");
+            Ok(())
+        }
+    }
+}
+
+enum TimerOutcome {
+    Completed,
+    ExitedEarly,
+}
+
+fn wait_until_timer_or_interrupt(timer_duration: Duration) -> io::Result<TimerOutcome> {
+    let start_time = time::Instant::now();
+    println!("  Press ESC or 'e' to exit early!");
+    enable_raw_mode()?;
+    while start_time.elapsed() < timer_duration {
+        if poll(Duration::from_millis(1_000))? {
+            let event = read()?;
+
+            // Check for 'e' or Esc key to exit early
+            if let Event::Key(key) = event {
+                if key.code == KeyCode::Char('e') || key.code == KeyCode::Esc {
+                    disable_raw_mode()?;
+                    return Ok(TimerOutcome::ExitedEarly);
+                }
+            }
+        }
+    }
+    disable_raw_mode()?;
+    Ok(TimerOutcome::Completed)
 }
 
 // Helper: Restore hosts file from backup
 fn restore_hosts_file(backup_path: &PathBuf, hosts_path: &str) -> io::Result<()> {
     let backup_file_content = fs::read_to_string(backup_path)?;
-    let mut backup_file = fs::OpenOptions::new()
+    let mut backup_file = OpenOptions::new()
         .write(true)
         .truncate(true)
         .open(hosts_path)?;
@@ -146,19 +193,15 @@ fn restore_hosts_file(backup_path: &PathBuf, hosts_path: &str) -> io::Result<()>
     Ok(())
 }
 
-/// Reads config.toml and returns the websites file path, or an error if not set.
-fn get_websites_file_path_from_config(config_path: PathBuf) -> io::Result<String> {
-    let config_content = fs::read_to_string(config_path)?;
-    let config_toml_data: Value = toml::from_str(&config_content)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid TOML in config file"))?;
-    match config_toml_data
+pub fn get_websites_path(config_path: PathBuf) -> Option<String> {
+    let config_content = fs::read_to_string(config_path).unwrap();
+    let value: Value = toml::from_str(&config_content).unwrap();
+
+    let website_list_path = value
         .get("website_list_path")
         .and_then(Value::as_str)
-    {
-        Some(path) => Ok(path.to_string()),
-        None => Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "website_list_path not set in config",
-        )),
-    }
+        .map(String::from);
+    // .unwrap();
+
+    website_list_path
 }

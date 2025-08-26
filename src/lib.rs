@@ -1,10 +1,24 @@
 pub mod os_backend;
+
 pub mod blocking {
-    pub mod block_websites;
+    pub mod methods {
+        pub mod block_duration;
+    }
+    pub mod ui {
+        pub mod spinners;
+    }
+    pub mod config {
+        pub mod config;
+    }
+    pub mod websites {
+        pub mod hosts_specific_implementation {
+            pub mod hosts;
+        }
+        pub mod block_websites;
+    }
 }
-pub mod config {
-    
-}
+
+pub mod config {}
 
 pub mod cli {
     pub mod cli_runner;

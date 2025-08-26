@@ -7,7 +7,7 @@ use crate::cli::cli_runner::Cli;
 pub fn set_block_for_time_and_task(cli: Cli) {
     if let (Some(time), Some(task)) = (cli.time, cli.task) {
 
-        block_websites::block_websites_via_host_config_change(
+        block_websites::block_websites_via_hosts_config_change(
             &time,
             Some(&task),
         )

@@ -1,9 +1,6 @@
-
 use clap::{Parser, Subcommand};
 
-
 use super::commands;
-use super::set_block_for_time_and_task::set_block_for_time_and_task;
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -44,10 +41,7 @@ pub fn run_cli() -> Result<(), String> {
         Some(Commands::Start(start_args)) => commands::start::cmd_start(start_args),
         Some(Commands::Setup(setup_args)) => commands::setup::cmd_setup(setup_args),
         Some(Commands::Reset) => commands::reset::cmd_reset(),
-        None => {
-            let _ = set_block_for_time_and_task(cli);
-            Ok(())
-        }
+        None => Err("No commands provided!".to_string()),
     }
 }
 

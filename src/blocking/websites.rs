@@ -3,12 +3,9 @@ use std::{
     io::{self, Write},
 };
 
-use crate::{blocking::methods::block_duration, os_backend};
+use crate::os_backend;
 
-use super::hosts_specific_implementation::hosts::{
-    restore_hosts_file, rewrite_hosts_contents_to_block_websites,
-};
-use crate::blocking::{config::config, ui::spinners::show_interruptible_spinner_for_duration};
+use crate::blocking::config::config;
 
 // Make a struct in the blocking module that describes exactly what is to be
 // blocked (websites first, then apps later; how long, and a short-hand name
@@ -18,13 +15,12 @@ use crate::blocking::{config::config, ui::spinners::show_interruptible_spinner_f
 // for that combination can be stored in a yaml or toml file in a few config
 // directories, and represented by a struct in Rust.
 
-
 pub trait Blockable {
     fn block(&self) -> std::io::Result<()>;
     fn unblock(&self) -> std::io::Result<()>;
 }
 
-struct Websites {
+pub struct Websites {
     hosts_path: String,
     backup_path: String,
     pub blocked_websites_list: String,
@@ -47,7 +43,7 @@ impl Websites {
         }
     }
 
-    pub(super) fn backup_hosts(hosts_path: String) -> io::Result<std::path::PathBuf> {
+    fn backup_hosts(hosts_path: String) -> io::Result<std::path::PathBuf> {
         let backup_path = config::find_config_dir()?.join("hosts_backup");
         fs::create_dir_all(backup_path.parent().unwrap())?;
         fs::copy(hosts_path, &backup_path)?;
@@ -70,8 +66,15 @@ impl Websites {
 impl Blockable for Websites {
     fn block(&self) -> std::io::Result<()> {
         let hosts_content = fs::read_to_string(&self.hosts_path)?;
-        let hosts_file_with_blocked_websites =
-            rewrite_hosts_contents_to_block_websites(&hosts_content, &self.blocked_websites_list);
+        let mut hosts_file_with_blocked_websites = hosts_content.clone();
+        hosts_file_with_blocked_websites.push_str("\n# ========== Temp Hosts =========");
+        for website in self.blocked_websites_list.lines() {
+            let website = website.trim();
+            if !website.is_empty() && !hosts_content.contains(website) {
+                hosts_file_with_blocked_websites.push_str(&format!("\n127.0.0.1\t{}", website));
+            }
+        }
+        hosts_file_with_blocked_websites.push_str("\n# ========== Temp Hosts =========");
         println!("Content:\n {}", hosts_file_with_blocked_websites);
         fs::write(&self.hosts_path, &hosts_file_with_blocked_websites)?;
         Ok(())
@@ -86,20 +89,4 @@ impl Blockable for Websites {
         backup_file.write_all(backup_file_content.as_bytes())?;
         Ok(())
     }
-}
-
-fn show_blocking_spinner(user_input_time: &String, task: Option<&String>) -> io::Result<()> {
-    let formatted_message = generate_blocking_message(user_input_time, task);
-    let duration_to_wait = block_duration::parse_time_string(user_input_time);
-    show_interruptible_spinner_for_duration(&duration_to_wait, &formatted_message)?;
-    Ok(())
-}
-
-fn generate_blocking_message(user_input_time: &String, task: Option<&String>) -> String {
-    // Make a message to inform the user what's being blocked.
-    let formatted_message = match task {
-        Some(t) => format!("Blocked websites for {} for task: {}", user_input_time, t),
-        None => format!("Blocked websites for {}", user_input_time),
-    };
-    formatted_message
 }

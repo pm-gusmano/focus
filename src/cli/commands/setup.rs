@@ -4,13 +4,14 @@ use std::{
     path::PathBuf,
 };
 
-use serde::Serialize;
-use clap::Args;
 use crate::utils::config_file_helper;
+use clap::Args;
+use serde::Serialize;
 
 pub fn cmd_setup(setup_args: &SetupConfigArgs) -> Result<(), String> {
     // Use helper to get config directory and ensure it exists
-    let config_dir: PathBuf = config_file_helper::find_config_dir().expect("Could not find config directory");
+    let config_dir: PathBuf =
+        config_file_helper::find_config_dir().expect("Could not find config directory");
     fs::create_dir_all(&config_dir).expect("Could not create config directory");
 
     // Create hosts_backup file if it doesn't exist
@@ -42,8 +43,8 @@ pub fn cmd_setup(setup_args: &SetupConfigArgs) -> Result<(), String> {
 #[derive(Args)]
 pub struct SetupConfigArgs {
     /// A txt file containing a list of websites to block, one per line
-     /// e.g. /home/user/.config/focus/websites.txt
-    #[arg(long = "list")]
+    /// e.g. /home/user/.config/focus/websites.txt
+    #[arg(long = "list", short = 'l')]
     pub list: String,
 }
 

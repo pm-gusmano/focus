@@ -4,8 +4,7 @@ use std::{
 };
 
 use crate::os_backend;
-
-use crate::blocking::config::config;
+use crate::utils::config_file_helper;
 
 // Make a struct in the blocking module that describes exactly what is to be
 // blocked (websites first, then apps later; how long, and a short-hand name
@@ -44,7 +43,7 @@ impl Websites {
     }
 
     fn backup_hosts(hosts_path: String) -> io::Result<std::path::PathBuf> {
-        let backup_path = config::find_config_dir()?.join("hosts_backup");
+        let backup_path = config_file_helper::find_config_dir()?.join("hosts_backup");
         fs::create_dir_all(backup_path.parent().unwrap())?;
         fs::copy(hosts_path, &backup_path)?;
         Ok(backup_path)
@@ -52,10 +51,11 @@ impl Websites {
 
     fn get_blocked_website_list_from_toml_config() -> Result<String, io::Error> {
         // Get the path to the config file
-        let toml_config_path = config::get_toml_config_path()?;
+        let toml_config_path = config_file_helper::get_toml_config_path()?;
 
         // Read the config file to generate the file path to the websites list
-        let blocked_websites_file_path = config::get_string_from_config(toml_config_path)?;
+        let blocked_websites_file_path =
+            config_file_helper::get_string_from_config(toml_config_path)?;
 
         // Get the list of blocked websites
         let blocked_websites_list = fs::read_to_string(blocked_websites_file_path)?;

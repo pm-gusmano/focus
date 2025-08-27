@@ -8,7 +8,7 @@ use directories::ProjectDirs;
 
 use crate::os_backend;
 
-pub fn cmd_reset() {
+pub fn cmd_reset() -> Result<(), String> {
     let hosts_path: &str = os_backend::get_hosts_path();
     let mut backup_path: PathBuf = PathBuf::new();
 
@@ -27,5 +27,6 @@ pub fn cmd_reset() {
         .open(hosts_path)
         .unwrap();
     host_file.write_all(backup_file_content.as_bytes()).unwrap();
-    println!("Hosts file reset ✅")
+    println!("Hosts file reset ✅");
+    Ok(())
 }

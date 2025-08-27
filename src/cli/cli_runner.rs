@@ -1,8 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use super::commands;
-use super::commands::setup::SetupConfigArgs;
-use super::set_block_for_time_and_task::set_block_for_time_and_task;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(author, version)]
@@ -25,19 +24,39 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Setup focus
-    Setup(SetupConfigArgs),
+    /// Start a block session
+    Start(commands::start::StartBlockArgs),
+
+    /// Setup a block session
+    Setup(commands::setup::SetupConfigArgs),
 
     /// Reset OS hosts file to original
     Reset,
 }
 
-pub fn run_cli() {
+pub fn run_cli() -> Result<(), String> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::Setup(setup_list)) => commands::setup::cmd_setup(setup_list),
+        Some(Commands::Start(start_args)) => commands::start::cmd_start(start_args),
+        Some(Commands::Setup(setup_args)) => commands::setup::cmd_setup(setup_args),
         Some(Commands::Reset) => commands::reset::cmd_reset(),
-        None => set_block_for_time_and_task(cli),
+        None => Err("No commands provided!".to_string()),
+    }
+}
+
+pub trait ToExitCode {
+    fn to_exit_code(self) -> ExitCode;
+}
+
+impl ToExitCode for Result<(), String> {
+    fn to_exit_code(self) -> ExitCode {
+        match self {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                ExitCode::FAILURE
+            }
+        }
     }
 }

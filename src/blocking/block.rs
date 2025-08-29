@@ -2,7 +2,7 @@ use std::{fs, io, path::Path, time::Duration};
 
 struct Block {
     name: String,
-    block_list: SoftwareList,
+    software_list: SoftwareList,
     condition_list: BlockConditions,
     restriction_list: Restrictions,
     enabled: bool,
@@ -17,10 +17,26 @@ struct SoftwareList {
 impl SoftwareList {
     fn from_txt<P: AsRef<Path>>(path: P) -> io::Result<Self> {
         let unsorted_software_list = fs::read_to_string(path)?;
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "Not implemented yet",
-        ));
+        let website_list: Vec<String> = unsorted_software_list
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+
+        let application_list: Vec<String> = Vec::new(); // Placeholder for future application list parsing
+
+        if website_list.is_empty() && application_list.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "The provided file is empty or contains only invalid entries.",
+            ));
+        }
+
+        Ok(SoftwareList {
+            website_list: if website_list.is_empty() { None } else { Some(website_list) },
+            application_list: if application_list.is_empty() { None } else { Some(application_list) },
+        })
+
     }
 }
 
